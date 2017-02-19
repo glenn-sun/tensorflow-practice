@@ -4,7 +4,7 @@
 # license can be found at http://www.apache.org/licenses/LICENSE-2.0
 # ==================================================================
 
-import numpy
+import numpy as np
 import os
 import random
 import urllib
@@ -16,24 +16,25 @@ from tensorflow.python.platform import gfile
 
 class DataSet(object):
 
-	def __init__(self, images, labels):
+	def __init__(self, data, labels):
 		"""Construct a DataSet."""
 
-		assert images.shape[0] == labels.shape[0], ('images.shape: %s labels.shape: %s' % (images.shape, labels.shape))
-		self._num_examples = images.shape[0]
+		assert data.shape[0] == labels.shape[0], ('data.shape: %s labels.shape: %s' 
+												  % (data.shape, labels.shape))
+		self._num_examples = data.shape[0]
 		
 		# Convert from [0, 255] -> [0.0, 1.0].
-		images = images.astype(numpy.float32)
-		images = numpy.multiply(images, 1.0 / 255.0)
+		data = data.astype(np.float32)
+		data = np.multiply(data, 1.0 / 255.0)
 
-		self._images = images
+		self._data = data
 		self._labels = labels
 		self._epochs_completed = 0
 		self._index_in_epoch = 0
 
 	@property
-	def images(self):
-		return self._images
+	def data(self):
+		return self._data
 
 	@property
 	def labels(self):
@@ -52,9 +53,9 @@ class DataSet(object):
 		start = self._index_in_epoch
 		# Shuffle for the first epoch
 		if self._epochs_completed == 0 and start == 0:
-			perm0 = numpy.arange(self._num_examples)
-			numpy.random.shuffle(perm0)
-			self._images = self.images[perm0]
+			perm0 = np.arange(self._num_examples)
+			np.random.shuffle(perm0)
+			self._data = self.data[perm0]
 			self._labels = self.labels[perm0]
 		# Go to the next epoch
 		if start + batch_size > self._num_examples:
@@ -62,24 +63,25 @@ class DataSet(object):
 			self._epochs_completed += 1
 			# Get the rest examples in this epoch
 			rest_num_examples = self._num_examples - start
-			images_rest_part = self._images[start:self._num_examples]
+			images_rest_part = self._data[start:self._num_examples]
 			labels_rest_part = self._labels[start:self._num_examples]
 			# Shuffle the data
-			perm = numpy.arange(self._num_examples)
-			numpy.random.shuffle(perm)
-			self._images = self.images[perm]
+			perm = np.arange(self._num_examples)
+			np.random.shuffle(perm)
+			self._data = self.data[perm]
 			self._labels = self.labels[perm]
 			# Start next epoch
 			start = 0
 			self._index_in_epoch = batch_size - rest_num_examples
 			end = self._index_in_epoch
-			images_new_part = self._images[start:end]
+			images_new_part = self._data[start:end]
 			labels_new_part = self._labels[start:end]
-			return numpy.concatenate((images_rest_part, images_new_part), axis=0) , numpy.concatenate((labels_rest_part, labels_new_part), axis=0)
+			return (np.concatenate((images_rest_part, images_new_part), axis=0),
+					np.concatenate((labels_rest_part, labels_new_part), axis=0))
 		else:
 			self._index_in_epoch += batch_size
 			end = self._index_in_epoch
-			return self._images[start:end], self._labels[start:end]
+			return self._data[start:end], self._labels[start:end]
 
 def retry(initial_delay, max_delay, factor=2.0, jitter=0.25, is_retriable=None):
 	"""Simple decorator for wrapping retriable functions.
@@ -163,8 +165,8 @@ def maybe_download(filename, work_directory, source_url):
 def dense_to_one_hot(labels_dense, num_classes):
 	"""Convert class labels from scalars to one-hot vectors."""
 	num_labels = labels_dense.shape[0]
-	index_offset = numpy.arange(num_labels) * num_classes
-	labels_one_hot = numpy.zeros((num_labels, num_classes))
+	index_offset = np.arange(num_labels) * num_classes
+	labels_one_hot = np.zeros((num_labels, num_classes))
 	labels_one_hot.flat[index_offset + labels_dense.ravel()] = 1
 	return labels_one_hot
 
@@ -193,6 +195,8 @@ def extract_cifar_10(train_dir, filename):
 
 	train_sets = []
 
+	print 'Unpickling and reshaping data'
+
 	with open(work_directory + 'data_batch_1', 'rb') as f:
 		train_sets.append(cPickle.load(f))
 
@@ -211,10 +215,14 @@ def extract_cifar_10(train_dir, filename):
 	with open(work_directory + 'test_batch', 'rb') as f:
 		test_set = cPickle.load(f)
 
-	train_images = numpy.concatenate([batch['data'].reshape(-1, 3, 32, 32).transpose(0, 2, 3, 1) for batch in train_sets])
-	train_labels = dense_to_one_hot(numpy.concatenate([numpy.array(batch['labels']) for batch in train_sets]), 10)
+	train_images = np.concatenate([batch['data'].reshape(-1, 3, 32, 32).transpose(0, 2, 3, 1)
+								   for batch in train_sets])
+	train_labels = dense_to_one_hot(np.concatenate([np.array(batch['labels'])
+													for batch in train_sets]), 10)
 	test_images = test_set['data'].reshape(-1, 3, 32, 32).transpose(0, 2, 3, 1)
-	test_labels = dense_to_one_hot(numpy.array(test_set['labels']), 10)
+	test_labels = dense_to_one_hot(np.array(test_set['labels']), 10)
+
+	print 'Finished unpickling and reshaping data'
 
 	return train_images, train_labels, test_images, test_labels
 
