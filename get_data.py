@@ -16,7 +16,7 @@ from tensorflow.python.platform import gfile
 
 class DataSet(object):
 
-	def __init__(self, data, labels):
+	def __init__(self, data, labels, augment_image=False):
 		"""Construct a DataSet."""
 
 		assert data.shape[0] == labels.shape[0], ('data.shape: %s labels.shape: %s' 
@@ -31,6 +31,7 @@ class DataSet(object):
 		self._labels = labels
 		self._epochs_completed = 0
 		self._index_in_epoch = 0
+		self._augment_image = augment_image
 
 	@property
 	def data(self):
@@ -48,7 +49,24 @@ class DataSet(object):
 	def epochs_completed(self):
 		return self._epochs_completed
 
-	def next_batch(self, batch_size):
+	def augment_image(self, data_batch, batch_size):
+		new_batch = np.empty([batch_size, 24, 24, 3])
+		for img in range(batch_size):
+			c_offset, r_offset = np.random.randint(0, 8, size=2)
+			new_batch[img] = data_batch[img, c_offset:c_offset + 24, r_offset:r_offset + 24, :]
+		flip = np.random.choice([True, False], size=[batch_size, 1, 1, 1])
+		new_batch = np.logical_not(flip) * new_batch + flip * new_batch[:, :, ::-1, :]
+		brightness_delta = np.random.uniform(-0.125, 0.125, size=[batch_size, 1, 1, 1])
+		new_batch = np.clip(new_batch + brightness_delta, 0, 1)
+		return new_batch
+
+	def test_augment_image(self, data_batch, batch_size):
+		new_batch = np.empty([batch_size, 24, 24, 3])
+		for img in range(batch_size):
+			new_batch[img] = data_batch[img, 4:28, 4:28, :]
+		return new_batch
+
+	def next_batch(self, batch_size, test_time=False):
 		"""Return the next `batch_size` examples from this data set."""
 		start = self._index_in_epoch
 		# Shuffle for the first epoch
@@ -63,7 +81,7 @@ class DataSet(object):
 			self._epochs_completed += 1
 			# Get the rest examples in this epoch
 			rest_num_examples = self._num_examples - start
-			images_rest_part = self._data[start:self._num_examples]
+			data_rest_part = self._data[start:self._num_examples]
 			labels_rest_part = self._labels[start:self._num_examples]
 			# Shuffle the data
 			perm = np.arange(self._num_examples)
@@ -74,14 +92,29 @@ class DataSet(object):
 			start = 0
 			self._index_in_epoch = batch_size - rest_num_examples
 			end = self._index_in_epoch
-			images_new_part = self._data[start:end]
+			data_new_part = self._data[start:end]
 			labels_new_part = self._labels[start:end]
-			return (np.concatenate((images_rest_part, images_new_part), axis=0),
-					np.concatenate((labels_rest_part, labels_new_part), axis=0))
+			if self._augment_image and test_time:
+				return (self.test_augment_image(np.concatenate((data_rest_part, data_new_part), 
+						axis=0), batch_size), np.concatenate((labels_rest_part, labels_new_part), 
+						axis=0))
+			elif self._augment_image:
+				return (self.augment_image(np.concatenate((data_rest_part, data_new_part), axis=0),
+						batch_size), np.concatenate((labels_rest_part, labels_new_part), axis=0))
+			else:
+				return (np.concatenate((data_rest_part, data_new_part), axis=0),
+					    np.concatenate((labels_rest_part, labels_new_part), axis=0))
 		else:
 			self._index_in_epoch += batch_size
 			end = self._index_in_epoch
-			return self._data[start:end], self._labels[start:end]
+			if self._augment_image and test_time:
+				return (self.test_augment_image(self._data[start:end], batch_size), 
+						self._labels[start:end])
+			elif self._augment_image:
+				return (self.augment_image(self._data[start:end], batch_size), 
+						self._labels[start:end])
+			else:
+				return self._data[start:end], self._labels[start:end]
 
 def retry(initial_delay, max_delay, factor=2.0, jitter=0.25, is_retriable=None):
 	"""Simple decorator for wrapping retriable functions.
@@ -168,7 +201,7 @@ def dense_to_one_hot(labels_dense, num_classes):
 	index_offset = np.arange(num_labels) * num_classes
 	labels_one_hot = np.zeros((num_labels, num_classes))
 	labels_one_hot.flat[index_offset + labels_dense.ravel()] = 1
-	return labels_one_hot
+	return labels_one_hot.astype(np.float32)
 
 def extract_cifar_10(train_dir, filename):
 	"""Extract the data unless it's already here, and reshape it.
@@ -228,13 +261,13 @@ def extract_cifar_10(train_dir, filename):
 
 Datasets = collections.namedtuple('Datasets', ['train', 'test'])
 
-def get_cifar_10(train_dir):
+def get_cifar_10(train_dir, augment_image=False):
 	DATASET = 'cifar-10-python.tar.gz'
 
 	local_file = maybe_download(DATASET, train_dir, 'https://www.cs.toronto.edu/~kriz/' + DATASET)
 	train_images, train_labels, test_images, test_labels = extract_cifar_10(train_dir, DATASET)
 
-	train = DataSet(train_images, train_labels)
-	test = DataSet(test_images, test_labels)
+	train = DataSet(train_images, train_labels, augment_image)
+	test = DataSet(test_images, test_labels, augment_image)
 
 	return Datasets(train=train, test=test)
