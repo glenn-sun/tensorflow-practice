@@ -19,8 +19,13 @@ def visualize_cifar_10(images, pred_labels, true_labels):
 		plt.title(title)
 		plt.show()
 
-def plot_learning_curve(losses):
-	plt.plot(losses)
-	plt.title('Loss')
+def plot_learning_curve(curves, x_axis=None, title='Loss'):
+	if x_axis is None:
+		for curve in curves:
+			plt.plot(curve)
+	else:
+		for curve in curves:
+			plt.plot(x_axis, curve)
+	plt.title(title)
 	plt.xlabel('Batch #')
 	plt.show()

@@ -32,6 +32,7 @@ class DataSet(object):
 		self._epochs_completed = 0
 		self._index_in_epoch = 0
 		self._augment_image = augment_image
+		self._freeze = False
 
 	@property
 	def data(self):
@@ -48,6 +49,9 @@ class DataSet(object):
 	@property
 	def epochs_completed(self):
 		return self._epochs_completed
+
+	def toggle_freeze(self):
+		self._freeze = not self._freeze
 
 	def augment_image(self, data_batch, batch_size):
 		new_batch = np.empty([batch_size, 24, 24, 3])
@@ -71,10 +75,11 @@ class DataSet(object):
 		start = self._index_in_epoch
 		# Shuffle for the first epoch
 		if self._epochs_completed == 0 and start == 0:
-			perm0 = np.arange(self._num_examples)
-			np.random.shuffle(perm0)
-			self._data = self.data[perm0]
-			self._labels = self.labels[perm0]
+			if not self._freeze:
+				perm0 = np.arange(self._num_examples)
+				np.random.shuffle(perm0)
+				self._data = self.data[perm0]
+				self._labels = self.labels[perm0]
 		# Go to the next epoch
 		if start + batch_size > self._num_examples:
 			# Finished epoch
@@ -84,10 +89,11 @@ class DataSet(object):
 			data_rest_part = self._data[start:self._num_examples]
 			labels_rest_part = self._labels[start:self._num_examples]
 			# Shuffle the data
-			perm = np.arange(self._num_examples)
-			np.random.shuffle(perm)
-			self._data = self.data[perm]
-			self._labels = self.labels[perm]
+			if not self._freeze:
+				perm = np.arange(self._num_examples)
+				np.random.shuffle(perm)
+				self._data = self.data[perm]
+				self._labels = self.labels[perm]
 			# Start next epoch
 			start = 0
 			self._index_in_epoch = batch_size - rest_num_examples
@@ -115,6 +121,10 @@ class DataSet(object):
 						self._labels[start:end])
 			else:
 				return self._data[start:end], self._labels[start:end]
+
+	def reset(self):
+		self._epochs_completed = 0
+		self._index_in_epoch = 0
 
 def retry(initial_delay, max_delay, factor=2.0, jitter=0.25, is_retriable=None):
 	"""Simple decorator for wrapping retriable functions.
@@ -259,15 +269,21 @@ def extract_cifar_10(train_dir, filename):
 
 	return train_images, train_labels, test_images, test_labels
 
-Datasets = collections.namedtuple('Datasets', ['train', 'test'])
+Datasets = collections.namedtuple('Datasets', ['train', 'validation', 'test'])
 
-def get_cifar_10(train_dir, augment_image=False):
+def get_cifar_10(train_dir, augment_image=False, validation_size=0):
 	DATASET = 'cifar-10-python.tar.gz'
 
 	local_file = maybe_download(DATASET, train_dir, 'https://www.cs.toronto.edu/~kriz/' + DATASET)
 	train_images, train_labels, test_images, test_labels = extract_cifar_10(train_dir, DATASET)
 
+	val_images = train_images[:validation_size]
+	val_labels = train_labels[:validation_size]
+	train_images = train_images[validation_size:]
+	train_labels = train_labels[validation_size:]
+
 	train = DataSet(train_images, train_labels, augment_image)
+	val = DataSet(val_images, val_labels, augment_image)
 	test = DataSet(test_images, test_labels, augment_image)
 
-	return Datasets(train=train, test=test)
+	return Datasets(train=train, validation=val, test=test)
